@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Word Climber — 四级单词冒险记</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#1a1a2e; font-family:'Microsoft YaHei', sans-serif; overflow:hidden; color:#fff; }
+  canvas { display:block; margin:0 auto; background:#2a2a4e; }
+  #ui-overlay { position:fixed; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:10; }
+  #hud { position:fixed; top:10px; left:10px; z-index:5; text-shadow:1px 1px 2px #000; }
+  #hud .hp { color:#ff5252; font-size:18px; }
+  #hud .master { color:#69f0ae; font-size:14px; }
+  #start-screen { position:fixed; top:0; left:0; width:100%; height:100%; background:linear-gradient(180deg, #0f0c29, #302b63, #24243e); display:flex; flex-direction:column; align-items:center; justify-content:center; z-index:30; pointer-events:auto; }
+  #start-screen h1 { font-size:36px; margin-bottom:10px; color:#fff; text-shadow:2px 2px 4px #000; }
+  #start-screen p { font-size:16px; margin-bottom:30px; color:#ccc; }
+  .btn { padding:12px 30px; font-size:18px; background:#667eea; color:#fff; border:none; border-radius:8px; cursor:pointer; box-shadow:0 4px 6px rgba(0,0,0,0.3); }
+  .btn:hover { background:#764ba2; }
+  #quiz-modal { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:linear-gradient(135deg, #667eea, #764ba2); border-radius:20px; padding:30px; width:90%; max-width:500px; box-shadow:0 20px 60px rgba(0,0,0,0.5); display:none; z-index:20; border:3px solid #fff; pointer-events:auto; }
+  #quiz-modal.show { display:block; }
+  #quiz-modal h2 { color:#fff; text-align:center; margin-bottom:10px; font-size:24px; }
+  #quiz-word { font-size:32px; font-weight:bold; color:#ffd700; text-align:center; margin:15px 0; text-shadow:2px 2px 4px #000; }
+  #quiz-meaning { color:#fff; text-align:center; font-size:18px; margin-bottom:25px; }
+  .quiz-btn { display:block; width:100%; padding:14px; margin:10px 0; border:2px solid #fff; border-radius:12px; background:rgba(255,255,255,0.15); color:#fff; font-size:18px; cursor:pointer; transition:all 0.2s; text-align:left; }
+  .quiz-btn:hover { background:rgba(255,255,255,0.35); transform:scale(1.02); }
+  .quiz-btn.correct { background:#00c853 !important; }
+  .quiz-btn.wrong { background:#ff1744 !important; }
+  #quiz-feedback { text-align:center; font-size:20px; margin-top:15px; font-weight:bold; min-height:24px; }
+  #touch-controls { position:fixed; bottom:20px; left:0; width:100%; display:none; justify-content:space-between; padding:0 20px; z-index:15; pointer-events:none; }
+  .touch-btn { width:60px; height:60px; background:rgba(255,255,255,0.2); border:2px solid #fff; border-radius:50%; color:#fff; font-size:24px; display:flex; align-items:center; justify-content:center; pointer-events:auto; user-select:none; }
+  .touch-btn:active { background:rgba(255,255,255,0.4); }
+  @media (max-width: 768px) { #touch-controls { display:flex; } }
+</style>
+</head>
+<body>
+
+<canvas id="gameCanvas"></canvas>
+
+<div id="hud">
+  <div class="hp">HP: ♥♥♥</div>
+  <div class="master">已掌握: <span id="master-count">0</span> 词</div>
+</div>
+
+<div id="start-screen">
+  <h1>Word Climber</h1>
+  <p>四级单词冒险记 · 赛璐璐风格</p>
+  <button class="btn" onclick="startGame()">开始冒险</button>
+  <p style="margin-top:20px;font-size:14px;">PC: A/D移动 · W/空格跳跃 · 触碰红方块答题<br>手机: 底部虚拟按键</p>
+</div>
+
+<div id="quiz-modal">
+  <h2>单词挑战</h2>
+  <div id="quiz-word">abandon</div>
+  <div id="quiz-meaning">请选择正确释义：</div>
+  <div id="quiz-options"></div>
+  <div id="quiz-feedback"></div>
+</div>
+
+<div id="touch-controls">
+  <div style="display:flex; gap:15px;">
+    <div class="touch-btn" id="btn-left">◀</div>
+    <div class="touch-btn" id="btn-right">▶</div>
+  </div>
+  <div class="touch-btn" id="btn-jump">▲</div>
+</div>
+
+<script>
+// ============ 单词库（四级核心词，可后续扩展至4500） ============
+const WORDS = [
+  {word:"abandon", meaning:"v.放弃，抛弃", options:["v.放弃，抛弃","v.吸收，吸引","v.加速，促进","v.调整，适应"]},
+  {word:"ability", meaning:"n.能力，才能", options:["n.能力，才能","n.异常，反常","n.地址，演讲","n.成人，成年人"]},
+  {word:"absorb", meaning:"v.吸收，吸引", options:["v.放弃，抛弃","v.吸收，吸引","v.加速，促进","v.调整，适应"]},
+  {word:"academic", meaning:"adj.学术的，学院的", options:["adj.学术的，学院的","adj.可接受的","adj.偶然的，意外的","adj.活跃的，积极的"]},
+  {word:"access", meaning:"n.通道，入口 v.访问", options:["n.通道，入口 v.访问","n.事故，意外","n.账户，说明","n.成就，成绩"]},
+  {word:"achieve", meaning:"v.达到，完成，实现", options:["v.达到，完成，实现","v.承认，认可","v.获得，取得","v.建议，提议"]},
+  {word:"acquire", meaning:"v.获得，取得，学到", options:["v.放弃，抛弃","v.要求，需要","v.获得，取得，学到","v.争论，辩论"]},
+  {word:"adapt", meaning:"v.使适应，改编", options:["v.使适应，改编","v.添加，附加","v.调整，调节","v.采用，采纳"]},
+  {word:"adequate", meaning:"adj.充足的，适当的", options:["adj.充足的，适当的","adj.高级的，先进的","adj.冒险的，危险的","adj.有利的，有帮助的"]},
+  {word:"admit", meaning:"v.承认，准许进入", options:["v.承认，准许进入","v.建议，提议","v.采用，采纳","v.前进，促进"]},
+  {word:"advance", meaning:"v.前进，提前 n.进展", options:["v.前进，提前 n.进展","v.广告，宣传","v.建议，劝告","v.影响，感动"]},
+  {word:"afford", meaning:"v.负担得起，提供", options:["v.负担得起，提供","v.影响，感动","v.聚集，集合","v.同意，赞成"]},
+  {word:"aggressive", meaning:"adj.侵略的，有进取心的", options:["adj.侵略的，有进取心的","adj.焦虑的，担忧的","adj.古老的，古代的","adj.愤怒的，生气的"]},
+  {word:"allocate", meaning:"v.分配，拨出", options:["v.分配，拨出","v.允许，准许","v.改变，修改","v.分析，分解"]},
+  {word:"analyze", meaning:"v.分析，分解", options:["v.分析，分解","v.宣布，宣告","v.愤怒，激怒","v.匿名，匿名者"]},
+  {word:"anxiety", meaning:"n.焦虑，忧虑", options:["n.焦虑，忧虑","n.角度，观点","n.动物，野兽","n.周年纪念日"]},
+  {word:"approach", meaning:"v.靠近 n.方法，途径", options:["v.靠近 n.方法，途径","v.批准，赞成","v.争论，辩论","v.安排，筹备"]},
+  {word:"appropriate", meaning:"adj.适当的 v.挪用", options:["adj.适当的 v.挪用","adj.大约的，近似的","adj.随意的，漫不经心的","adj.人工的，人造的"]},
+  {word:"argue", meaning:"v.争论，辩论，主张", options:["v.争论，辩论，主张","v.安排，筹备","v.到达，达成","v.艺术，美术"]},
+  {word:"arise", meaning:"v.出现，发生，起身", options:["v.出现，发生，起身","v.安排，筹备","v.到达，达成","v.艺术，美术"]}
+];
+
+// ============ 游戏核心变量 ============
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+let gameState = 'menu'; // menu / playing / quiz
+let keys = {};
+let touchLeft=false, touchRight=false, touchJump=false;
+
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// 玩家
+const player = {
+  x: 100, y: 300, w: 40, h: 60, vx: 0, vy: 0,
+  speed: 5, jumpPower: -15, onGround: false, facing: 1,
+  draw() {
+    // 赛璐璐风格角色（平涂+黑边）
+    ctx.fillStyle = '#ffd700';
+    ctx.fillRect(this.x, this.y, this.w, this.h);
+    ctx.strokeStyle = '#000'; ctx.lineWidth = 3;
+    ctx.strokeRect(this.x, this.y, this.w, this.h);
+    // 眼睛
+    ctx.fillStyle = '#000';
+    ctx.fillRect(this.x + (this.facing>0?25:5), this.y+15, 8, 8);
+    // 腿（简单动画）
+    const legOffset = Math.abs(this.vx) > 0 && this.onGround ? Math.sin(Date.now()/100)*5 : 0;
+    ctx.fillRect(this.x+10, this.y+this.h, 8, 15+legOffset);
+    ctx.fillRect(this.x+22, this.y+this.h, 8, 15-legOffset);
+  },
+  update(platforms) {
+    this.vy += 0.8; // 重力
+    this.x += this.vx;
+    this.y += this.vy;
+    this.onGround = false;
+    
+    // 平台碰撞
+    platforms.forEach(p => {
+      if (this.x < p.x+p.w && this.x+this.w > p.x && this.y < p.y+p.h && this.y+this.h > p.y) {
+        if (this.vy >= 0 && this.y+this.h-p.y < 20) {
+          this.y = p.y - this.h; this.vy = 0; this.onGround = true;
+        }
+      }
+    });
+    
+    // 边界
+    if (this.x < 0) this.x = 0;
+    if (this.x + this.w > canvas.width) this.x = canvas.width - this.w;
+    if (this.y > canvas.height + 100) { this.x = 100; this.y = 100; this.vy = 0; hp--; updateHUD(); }
+  }
+};
+
+// 平台与敌人
+let platforms = [];
+let enemies = [];
+let hp = 3;
+let masterCount = 0;
+let currentQuizEnemy = null;
+
+function initLevel() {
+  platforms = [
+    {x:0, y:canvas.height-40, w:canvas.width, h:40},
+    {x:200, y:canvas.height-120, w:150, h:20},
+    {x:400, y:canvas.height-200, w:150, h:20},
+    {x:600, y:canvas.height-280, w:150, h:20},
+    {x:300, y:canvas.height-360, w:150, h:20},
+    {x:100, y:canvas.height-440, w:150, h:20},
+  ];
+  enemies = [
+    {x:220, y:canvas.height-160, w:30, h:30, word:WORDS[0], dead:false, triggered:false, draw(){
+      if(this.dead) return;
+      ctx.fillStyle='#ff1744'; ctx.fillRect(this.x,this.y,this.w,this.h);
+      ctx.strokeStyle='#000'; ctx.lineWidth=2; ctx.strokeRect(this.x,this.y,this.w,this.h);
+    }, update(){}},
+    {x:420, y:canvas.height-240, w:30, h:30, word:WORDS[1], dead:false, triggered:false, draw(){
+      if(this.dead) return;
+      ctx.fillStyle='#ff1744'; ctx.fillRect(this.x,this.y,this.w,this.h);
+      ctx.strokeStyle='#000'; ctx.lineWidth=2; ctx.strokeRect(this.x,this.y,this.w,this.h);
+    }, update(){}},
+    {x:620, y:canvas.height-320, w:30, h:30, word:WORDS[2], dead:false, triggered:false, draw(){
+      if(this.dead) return;
+      ctx.fillStyle='#ff1744'; ctx.fillRect(this.x,this.y,this.w,this.h);
+      ctx.strokeStyle='#000'; ctx.lineWidth=2; ctx.strokeRect(this.x,this.y,this.w,this.h);
+    }, update(){}}
+  ];
+}
+
+// ============ 单词挑战逻辑 ============
+function startQuiz(enemy) {
+  if(enemy.triggered || enemy.dead) return;
+  enemy.triggered = true;
+  currentQuizEnemy = enemy;
+  gameState = 'quiz';
+  
+  const w = enemy.word;
+  document.getElementById('quiz-word').innerText = w.word;
+  const opts = [...w.options].sort(()=>Math.random()-0.5);
+  const optHtml = opts.map(o => `<button class="quiz-btn" onclick="answer('${o.replace(/'/g,"\\'")}','${w.meaning.replace(/'/g,"\\'")}')">${o}</button>`).join('');
+  document.getElementById('quiz-options').innerHTML = optHtml;
+  document.getElementById('quiz-feedback').innerText = '';
+  document.getElementById('quiz-modal').classList.add('show');
+}
+
+function answer(selected, correct) {
+  const btns = document.querySelectorAll('.quiz-btn');
+  btns.forEach(b => { b.disabled = true; if(b.innerText===correct) b.classList.add('correct'); });
+  if(selected === correct) {
+    document.getElementById('quiz-feedback').innerText = '✓ 正确！记忆度+1';
+    document.getElementById('quiz-feedback').style.color = '#00c853';
+    if(currentQuizEnemy) currentQuizEnemy.dead = true;
+    masterCount++;
+  } else {
+    document.getElementById('quiz-feedback').innerText = '✗ 错误！HP-1\n正确答案: '+correct;
+    document.getElementById('quiz-feedback').style.color = '#ff1744';
+    hp--;
+    if(currentQuizEnemy) currentQuizEnemy.triggered = false;
+  }
+  updateHUD();
+  setTimeout(() => {
+    document.getElementById('quiz-modal').classList.remove('show');
+    gameState = 'playing';
+    currentQuizEnemy = null;
+    if(hp <= 0) { alert('冒险失败，刷新重试！'); location.reload(); }
+    if(masterCount >= enemies.length) { alert('本章通关！（演示版）'); }
+  }, 1500);
+}
+
+// ============ 控制 ============
+window.addEventListener('keydown', e => { keys[e.key] = true; if(e.key===' ') e.preventDefault(); });
+window.addEventListener('keyup', e => { keys[e.key] = false; });
+
+document.getElementById('btn-left').addEventListener('touchstart', ()=>touchLeft=true);
+document.getElementById('btn-left').addEventListener('touchend', ()=>touchLeft=false);
+document.getElementById('btn-right').addEventListener('touchstart', ()=>touchRight=true);
+document.getElementById('btn-right').addEventListener('touchend', ()=>touchRight=false);
+document.getElementById('btn-jump').addEventListener('touchstart', ()=>{ if(player.onGround) player.vy=player.jumpPower; });
+
+function startGame() {
+  document.getElementById('start-screen').style.display = 'none';
+  gameState = 'playing';
+  initLevel();
+  gameLoop();
+}
+
+function updateHUD() {
+  document.querySelector('#hud .hp').innerText = 'HP: ' + '♥'.repeat(Math.max(0,hp));
+  document.getElementById('master-count').innerText = masterCount;
+}
+
+// ============ 渲染与循环 ============
+function drawBackground() {
+  ctx.fillStyle = '#2a2a4e';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+  // 赛璐璐风格星空/远山
+  ctx.fillStyle = 'rgba(100,100,150,0.2)';
+  for(let i=0;i<5;i++) ctx.fillRect(i*200, canvas.height-150, 100, 110);
+}
+
+function gameLoop() {
+  if(gameState === 'playing') {
+    player.vx = 0;
+    if(keys['a']||keys['ArrowLeft']||touchLeft) { player.vx = -player.speed; player.facing = -1; }
+    if(keys['d']||keys['ArrowRight']||touchRight) { player.vx = player.speed; player.facing = 1; }
+    if((keys['w']||keys['ArrowUp']||keys[' ']||touchJump) && player.onGround) { player.vy = player.jumpPower; touchJump=false; }
+    
+    player.update(platforms);
+    enemies.forEach(e => {
+      if(!e.dead && !e.triggered && player.x<e.x+e.w && player.x+player.w>e.x && player.y<e.y+e.h && player.y+player.h>e.y) startQuiz(e);
+    });
+    
+    drawBackground();
+    platforms.forEach(p => {
+      ctx.fillStyle='#4fc3a0'; ctx.fillRect(p.x,p.y,p.w,p.h);
+      ctx.strokeStyle='#000'; ctx.lineWidth=2; ctx.strokeRect(p.x,p.y,p.w,p.h);
+      ctx.fillStyle='#81c784'; ctx.fillRect(p.x,p.y,p.w,5);
+    });
+    enemies.forEach(e => e.draw());
+    player.draw();
+    updateHUD();
+  }
+  requestAnimationFrame(gameLoop);
+}
+</script>
+</body>
+</html>
